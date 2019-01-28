@@ -684,7 +684,7 @@ async function main() {
     let $ = cheerio.load(body);
 
     let pdfUrls: string[] = [];
-    for (let element of $("div.u6ListItem a").get()) {
+    for (let element of $("p a[title*='Development Register'][href$='.pdf']").get()) {
         let pdfUrl = new urlparser.URL(element.attribs.href, DevelopmentApplicationsUrl).href
         if (!pdfUrls.some(url => url === pdfUrl))
             pdfUrls.push(pdfUrl);
