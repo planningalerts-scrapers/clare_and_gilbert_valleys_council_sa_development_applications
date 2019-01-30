@@ -706,7 +706,7 @@ async function main() {
     let selectedPdfUrls: string[] = [];
     selectedPdfUrls.push(pdfUrls.shift());
     if (pdfUrls.length > 0)
-        selectedPdfUrls.push(pdfUrls[getRandom(1, pdfUrls.length)]);
+        selectedPdfUrls.push(pdfUrls[getRandom(0, pdfUrls.length)]);
     if (getRandom(0, 2) === 0)
         selectedPdfUrls.reverse();
 
