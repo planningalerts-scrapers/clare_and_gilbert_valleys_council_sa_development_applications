@@ -187,7 +187,7 @@ function formatStreetName(text: string) {
 function formatAddress(address: string) {
     // Allow for a few special cases (eg. road type suffixes).
 
-    address = address.replace(/ TCE NTH/g, " TERRACE NORTH").replace(/ TCE STH/g, " TERRACE SOUTH").replace(/ TCE EAST/g, " TERRACE EAST").replace(/ TCE WEST/g, " TERRACE WEST");
+    address = address.trim().replace(/ TCE NTH/g, " TERRACE NORTH").replace(/ TCE STH/g, " TERRACE SOUTH").replace(/ TCE EAST/g, " TERRACE EAST").replace(/ TCE WEST/g, " TERRACE WEST");
 
     // Break the address up based on commas (the main components of the address are almost always
     // separated by commas).
@@ -284,7 +284,7 @@ async function parsePdf(url: string) {
         // example, "DEV NO.".
 
         let leftmostElement = elements.reduce(((previous, current) => previous === undefined ? current : (current.x < previous.x ? current : previous)), undefined);
-        let leftmostElements = elements.filter(element => Math.abs(element.x - leftmostElement.x) < 10);
+        let leftmostElements = elements.filter(element => Math.abs(element.x - leftmostElement.x) < 20);
         let yComparer = (a, b) => (a.y > b.y) ? 1 : ((a.y < b.y) ? -1 : 0);
         leftmostElements.sort(yComparer);
 
@@ -380,7 +380,7 @@ async function parsePdf(url: string) {
             hundredName = hundredName.replace(/^HD /i, "");
             suburbName = suburbName.replace(/^HD /i, "");
 
-            let address = formatAddress((streetName !== "" && suburbName !== "") ? `${houseNumber} ${streetName}, ${suburbName}` : "");
+            let address = formatAddress((streetName !== "" && suburbName !== "") ? `${houseNumber} ${streetName}, ${suburbName}`.toUpperCase() : "");
 
             // Get the description.
 
@@ -482,7 +482,7 @@ async function main() {
     let pdfUrls: string[] = [];
     for (let element of $("p a").get()) {
         let pdfUrl = new urlparser.URL(element.attribs.href, DevelopmentApplicationsUrl).href;
-        if (pdfUrl.toLowerCase().includes(".pdf"))
+        if (pdfUrl.toLowerCase().includes("register") && pdfUrl.toLowerCase().includes(".pdf"))
             if (!pdfUrls.some(url => url === pdfUrl))  // avoid duplicates
                 pdfUrls.push(pdfUrl);
     }
@@ -501,14 +501,13 @@ async function main() {
     // process).
 
     let selectedPdfUrls: string[] = [];
-    selectedPdfUrls.push(pdfUrls.shift());
+    selectedPdfUrls.push(pdfUrls.pop());
     if (pdfUrls.length > 0)
         selectedPdfUrls.push(pdfUrls[getRandom(0, pdfUrls.length)]);
     if (getRandom(0, 2) === 0)
         selectedPdfUrls.reverse();
 
-// for (let pdfUrl of selectedPdfUrls) {
-    for (let pdfUrl of [ "https://www.claregilbertvalleys.sa.gov.au/webdata/resources/files/Website%20Development%20Register%202016.pdf" ]) {
+    for (let pdfUrl of selectedPdfUrls) {
         console.log(`Parsing document: ${pdfUrl}`);
         let developmentApplications = await parsePdf(pdfUrl);
         console.log(`Parsed ${developmentApplications.length} development ${(developmentApplications.length == 1) ? "application" : "applications"} from document: ${pdfUrl}`);
