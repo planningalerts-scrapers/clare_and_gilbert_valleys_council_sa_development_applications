@@ -70,13 +70,6 @@ async function insertRow(database, developmentApplication) {
     });
 }
 
-// A 2D point.
-
-interface Point {
-    x: number,
-    y: number
-}
-
 // A bounding rectangle.
 
 interface Rectangle {
@@ -90,12 +83,6 @@ interface Rectangle {
 
 interface Element extends Rectangle {
     text: string
-}
-
-// A cell in a grid (owning zero, one or more elements).
-
-interface Cell extends Rectangle {
-    elements: Element[]
 }
 
 // Reads all the address information into global objects.
@@ -133,34 +120,6 @@ function readAddressInformation() {
             SuburbNames["MT. " + suburbName.substring("MOUNT ".length)] = suburbTokens[1].trim();
         }
     }
-}
-
-// Constructs a rectangle based on the intersection of the two specified rectangles.
-
-function intersect(rectangle1: Rectangle, rectangle2: Rectangle): Rectangle {
-    let x1 = Math.max(rectangle1.x, rectangle2.x);
-    let y1 = Math.max(rectangle1.y, rectangle2.y);
-    let x2 = Math.min(rectangle1.x + rectangle1.width, rectangle2.x + rectangle2.width);
-    let y2 = Math.min(rectangle1.y + rectangle1.height, rectangle2.y + rectangle2.height);
-    if (x2 >= x1 && y2 >= y1)
-        return { x: x1, y: y1, width: x2 - x1, height: y2 - y1 };
-    else
-        return { x: 0, y: 0, width: 0, height: 0 };
-}
-
-// Calculates the fraction of an element that lies within a cell (as a percentage).  For example,
-// if a quarter of the specifed element lies within the specified cell then this would return 25.
-
-function getPercentageOfElementInCell(element: Element, cell: Cell) {
-    let elementArea = getArea(element);
-    let intersectionArea = getArea(intersect(cell, element));
-    return (elementArea === 0) ? 0 : ((intersectionArea * 100) / elementArea);
-}
-
-// Calculates the area of a rectangle.
-
-function getArea(rectangle: Rectangle) {
-    return rectangle.width * rectangle.height;
 }
 
 // Gets the percentage of horizontal overlap between two rectangles (0 means no overlap and 100
@@ -250,108 +209,6 @@ function formatAddress(address: string) {
     return formatStreetName(streetName) + ", " + SuburbNames[suburbName];
 }
 
-// Examines all the lines in a page of a PDF and constructs cells (ie. rectangles) based on those
-// lines.
-
-async function parseCells(page) {
-    let operators = await page.getOperatorList();
-
-    // Find the lines.  Each line is actually constructed using a rectangle with a very short
-    // height or a very narrow width.
-
-    let lines: Rectangle[] = [];
-
-    let previousRectangle = undefined;
-    let transformStack = [];
-    let transform = [ 1, 0, 0, 1, 0, 0 ];
-    transformStack.push(transform);
-
-    for (let index = 0; index < operators.fnArray.length; index++) {
-        let argsArray = operators.argsArray[index];
-
-        if (operators.fnArray[index] === pdfjs.OPS.restore)
-            transform = transformStack.pop();
-        else if (operators.fnArray[index] === pdfjs.OPS.save)
-            transformStack.push(transform);
-        else if (operators.fnArray[index] === pdfjs.OPS.transform)
-            transform = pdfjs.Util.transform(transform, argsArray);
-        else if (operators.fnArray[index] === pdfjs.OPS.constructPath) {
-            let argumentIndex = 0;
-            for (let operationIndex = 0; operationIndex < argsArray[0].length; operationIndex++) {
-                if (argsArray[0][operationIndex] === pdfjs.OPS.moveTo)
-                    argumentIndex += 2;
-                else if (argsArray[0][operationIndex] === pdfjs.OPS.lineTo)
-                    argumentIndex += 2;
-                else if (argsArray[0][operationIndex] === pdfjs.OPS.rectangle) {
-                    let x1 = argsArray[1][argumentIndex++];
-                    let y1 = argsArray[1][argumentIndex++];
-                    let width = argsArray[1][argumentIndex++];
-                    let height = argsArray[1][argumentIndex++];
-                    let x2 = x1 + width;
-                    let y2 = y1 + height;
-                    [x1, y1] = pdfjs.Util.applyTransform([x1, y1], transform);
-                    [x2, y2] = pdfjs.Util.applyTransform([x2, y2], transform);
-                    width = x2 - x1;
-                    height = y2 - y1;
-                    previousRectangle = { x: x1, y: y1, width: width, height: height };
-                }
-            }
-        } else if ((operators.fnArray[index] === pdfjs.OPS.fill || operators.fnArray[index] === pdfjs.OPS.eoFill) && previousRectangle !== undefined) {
-            lines.push(previousRectangle);
-            previousRectangle = undefined;
-        }
-    }
-
-    // Determine all the horizontal lines and vertical lines that make up the grid.  The following
-    // is careful to ignore the short lines and small rectangles that make up the logo at the top
-    // left of the page (otherwise these would cause problems due to the additional cells that
-    // they would cause to be constructed later).
-
-    let horizontalLines: Rectangle[] = [];
-    let verticalLines: Rectangle[] = [];
-
-    for (let line of lines) {
-        if (line.height <= 2 && line.width >= 200) {
-            // Identify a horizontal line (these typically extend across the width of the page).
-
-            horizontalLines.push(line);
-        } else if (line.width <= 2 && line.height >= 10) {
-            // Identify a vertical line (note that these might not be very tall if there are not
-            // many development applications in the grid).
-
-            verticalLines.push(line);
-        } else if (line.height >= 5 && line.width >= 200) {
-            // Convert the header into two horizonal lines (the header is typically a rectangle
-            // that extends across the width of the page).
-
-            horizontalLines.push({ x: line.x, y: line.y, width: line.width, height: 1 });
-            horizontalLines.push({ x: line.x, y: line.y + line.height, width: line.width, height: 1 });
-        }
-    }
-
-    let verticalLineComparer = (a, b) => (a.x > b.x) ? 1 : ((a.x < b.x) ? -1 : 0);
-    verticalLines.sort(verticalLineComparer);
-
-    let horizontalLineComparer = (a, b) => (a.y > b.y) ? 1 : ((a.y < b.y) ? -1 : 0);
-    horizontalLines.sort(horizontalLineComparer);
-    
-    // Construct cells based on the grid of lines.
-
-    let cells: Cell[] = [];
-
-    for (let horizontalLineIndex = 0; horizontalLineIndex < horizontalLines.length - 1; horizontalLineIndex++) {
-        for (let verticalLineIndex = 0; verticalLineIndex < verticalLines.length - 1; verticalLineIndex++) {
-            let horizontalLine = horizontalLines[horizontalLineIndex];
-            let nextHorizontalLine = horizontalLines[horizontalLineIndex + 1];
-            let verticalLine = verticalLines[verticalLineIndex];
-            let nextVerticalLine = verticalLines[verticalLineIndex + 1];
-            cells.push({ elements: [], x: verticalLine.x, y: horizontalLine.y, width: nextVerticalLine.x - verticalLine.x, height: nextHorizontalLine.y - horizontalLine.y });
-        }
-    }
-
-    return cells;
-}
-
 // Parses the text elements from a page of a PDF.
 
 async function parseElements(page) {
@@ -407,11 +264,6 @@ async function parsePdf(url: string) {
         console.log(`Reading and parsing applications from page ${pageIndex + 1} of ${pdf.numPages}.`);
         let page = await pdf.getPage(pageIndex + 1);
 
-        // Construct cells (ie. rectangles) based on the horizontal and vertical line segments
-        // in the PDF page.
-
-        let cells = await parseCells(page);
-
         // Construct elements based on the text in the PDF page.
 
         let elements = await parseElements(page);
@@ -419,16 +271,8 @@ async function parsePdf(url: string) {
         // The co-ordinate system used in a PDF is typically "upside done" so invert the
         // co-ordinates (and so this makes the subsequent logic easier to understand).
 
-        for (let cell of cells)
-            cell.y = -(cell.y + cell.height);
-
         for (let element of elements)
             element.y = -(element.y + element.height);
-
-        // Sort the cells by approximate Y co-ordinate and then by X co-ordinate.
-
-        let cellComparer = (a, b) => (Math.abs(a.y - b.y) < 2) ? ((a.x > b.x) ? 1 : ((a.x < b.x) ? -1 : 0)) : ((a.y > b.y) ? 1 : -1);
-        cells.sort(cellComparer);
 
         // Sort the text elements by approximate Y co-ordinate and then by X co-ordinate.
 
