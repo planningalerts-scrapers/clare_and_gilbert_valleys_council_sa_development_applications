@@ -394,6 +394,14 @@ async function parsePdf(url: string) {
 
     // Parse the PDF.  Each page has the details of multiple applications.
 
+    let receivedDateHeadingElement: Element;
+    let lotNumberHeadingElement: Element;
+    let houseNumberHeadingElement: Element;
+    let streetNameHeadingElement: Element;
+    let planHeadingElement: Element;
+    let suburbNameHeadingElement: Element;
+    let descriptionHeadingElement: Element;
+
     let pdf = await pdfjs.getDocument({ data: buffer, disableFontFace: true, ignoreErrors: true });
     for (let pageIndex = 0; pageIndex < pdf.numPages; pageIndex++) {
         console.log(`Reading and parsing applications from page ${pageIndex + 1} of ${pdf.numPages}.`);
@@ -427,163 +435,153 @@ async function parsePdf(url: string) {
         let elementComparer = (a, b) => (Math.abs(a.y - b.y) < 1) ? ((a.x > b.x) ? 1 : ((a.x < b.x) ? -1 : 0)) : ((a.y > b.y) ? 1 : -1);
         elements.sort(elementComparer);
 
-        // Allocate each element to an "owning" cell.
+        // Find the first column of elements.  Each element in the first column should contain
+        // a development application number, for example, "371/002/17" or a column heading, for
+        // example, "DEV NO.".
 
-        for (let element of elements) {
-            let ownerCell = cells.find(cell => getPercentageOfElementInCell(element, cell) > 50);  // at least 50% of the element must be within the cell deemed to be the owner
-            if (ownerCell !== undefined)
-                ownerCell.elements.push(element);
-        }
+        let leftmostElement = elements.reduce(((previous, current) => previous === undefined ? current : (current.x < previous.x ? current : previous)), undefined);
+        let leftmostElements = elements.filter(element => Math.abs(element.x - leftmostElement.x) < 10);
+        let yComparer = (a, b) => (a.y > b.y) ? 1 : ((a.y < b.y) ? -1 : 0);
+        leftmostElements.sort(yComparer);
 
-        // Group the cells into rows.
+        // Use the first column of elements as anchor points (the bottom, left corner is the best
+        // starting point as all text for a line is bottom justified relative to the development
+        // application number element).
 
-        let rows: Cell[][] = [];
+        for (let index = 0; index < leftmostElements.length; index++) {
+            let row = elements.filter(element => element.y <= leftmostElements[index].y && (index === 0 || element.y > leftmostElements[index - 1].y));
+            let leftmostElement = leftmostElements[index];
+            if (index === 0 && leftmostElement.text.toUpperCase().replace(/[^A-Z]/g, "") === "DEVNO") {
+                // Column headings.
 
-        for (let cell of cells) {
-            let row = rows.find(row => Math.abs(row[0].y - cell.y) < 2);  // approximate Y co-ordinate match
-            if (row === undefined)
-                rows.push([ cell ]);  // start a new row
-            else
-                row.push(cell);  // add to an existing row
-        }
+                receivedDateHeadingElement = row.find(element => element.text.toUpperCase().replace(/[^A-Z]/g, "") === "LODGED");
+                lotNumberHeadingElement = row.find(element => element.text.toUpperCase().replace(/[^A-Z]/g, "") === "LOTNO");
+                houseNumberHeadingElement = row.find(element => element.text.toUpperCase().replace(/[^A-Z]/g, "") === "STNO");
+                streetNameHeadingElement = row.find(element => element.text.toUpperCase().replace(/[^A-Z]/g, "") === "STNAME");
+                planHeadingElement = row.find(element => element.text.toUpperCase().replace(/[^A-Z]/g, "") === "FPDP");
+                suburbNameHeadingElement = row.find(element => element.text.toUpperCase().replace(/[^A-Z]/g, "") === "SUBURBHDOF");
+                descriptionHeadingElement = row.find(element => element.text.toUpperCase().replace(/[^A-Z]/g, "") === "DESCRIPTIONOFDEVELOPMENT");
+            } else {
+                // Development application details.
 
-        // Check that there is at least one row (even if it is just the heading row).
+                let receivedDateElements = row.filter(element => getHorizontalOverlapPercentage(receivedDateHeadingElement, element) > 0);
+                let lotNumberElements = row.filter(element => getHorizontalOverlapPercentage(lotNumberHeadingElement, element) > 0);
+                let houseNumberElements = row.filter(element => getHorizontalOverlapPercentage(houseNumberHeadingElement, element) > 0);
+                let streetNameElements = row.filter(element => getHorizontalOverlapPercentage(streetNameHeadingElement, element) > 0);
+                let planElements = row.filter(element => getHorizontalOverlapPercentage(planHeadingElement, element) > 0);
+                let suburbNameElements = row.filter(element => getHorizontalOverlapPercentage(suburbNameHeadingElement, element) > 0);
+                let descriptionElements = row.filter(element => getHorizontalOverlapPercentage(descriptionHeadingElement, element) > 0);
 
-        if (rows.length === 0) {
-            let elementSummary = elements.map(element => `[${element.text}]`).join("");
-            console.log(`No development applications can be parsed from the current page because no rows were found (based on the grid).  Elements: ${elementSummary}`);
-            continue;
-        }
+                // Get the application number.
 
-        // Ensure the rows are sorted by Y co-ordinate and that the cells in each row are sorted
-        // by X co-ordinate (this is really just a safety precaution because the earlier sorting
-        // of cells in the parseCells function should have already ensured this).
+                let applicationNumber = leftmostElements[index].text.replace(/\s/g, "").trim();
 
-        let rowComparer = (a, b) => (a[0].y > b[0].y) ? 1 : ((a[0].y < b[0].y) ? -1 : 0);
-        rows.sort(rowComparer);
+                // Get the received date.
 
-        let rowCellComparer = (a, b) => (a.x > b.x) ? 1 : ((a.x < b.x) ? -1 : 0);
-        for (let row of rows)
-            row.sort(rowCellComparer);
+                let receivedDate = moment.invalid();
+                if (receivedDateElements !== undefined)
+                    receivedDate = moment(receivedDateElements.map(element => element.text).join(" ").replace(/\s\s+/g, " ").trim(), "D-MMM-YY", true);
 
-        // Find the heading cells.
+                // Get the lot number.
 
-        let applicationNumberCell = cells.find(cell => cell.elements.some(element => element.text.replace(/\s/g, "") === "APPLICATION"));
-        let receivedDateCell = cells.find(cell => cell.elements.some(element => element.text.replace(/\s/g, "") === "RECEIPT"));
-        let houseNumberCell = cells.find(cell => cell.elements.map(element => element.text).join("").replace(/\s/g, "") === "NO.");
-        let lotCell = cells.find(cell => cell.elements.some(element => element.text.replace(/\s/g, "") === "LOT"));
-        let sectionCell = cells.find(cell => cell.elements.some(element => element.text.replace(/\s/g, "") === "SECTION/"));
-        let addressCell = cells.find(cell => cell.elements.some(element => element.text.replace(/\s/g, "") === "PROPERTYADDRESS"));
-        let descriptionCell = cells.find(cell => cell.elements.some(element => element.text.replace(/\s/g, "") === "DESCRIPTION"));
+                let lotNumber = "";
+                if (lotNumberElements !== undefined)
+                    lotNumber = lotNumberElements.map(element => element.text).join(" ").replace(/\s\s+/g, " ").trim();
 
-        if (applicationNumberCell === undefined) {
-            let elementSummary = elements.map(element => `[${element.text}]`).join("");
-            console.log(`No development applications can be parsed from the current page because the "APPLICATION" column heading was not found.  Elements: ${elementSummary}`);
-            continue;
-        }
+                // Get the house number.
 
-        if (addressCell === undefined) {
-            let elementSummary = elements.map(element => `[${element.text}]`).join("");
-            console.log(`No development applications can be parsed from the current page because the "PROPERTY ADDRESS" column heading was not found.  Elements: ${elementSummary}`);
-            continue;
-        }
+                let houseNumber = "";
+                if (houseNumberElements !== undefined)
+                    houseNumber = houseNumberElements.map(element => element.text).join(" ").replace(/\s\s+/g, " ").trim();
 
-        // Try to extract a development application from each row (some rows, such as the heading
-        // row, will not actually contain a development application).
+                // Get the street name.
 
-        for (let row of rows) {
-            let rowApplicationNumberCell = row.find(cell => getHorizontalOverlapPercentage(cell, applicationNumberCell) > 90);
-            let rowReceivedDateCell = row.find(cell => getHorizontalOverlapPercentage(cell, receivedDateCell) > 90);
-            let rowHouseNumberCell = row.find(cell => getHorizontalOverlapPercentage(cell, houseNumberCell) > 90);
-            let rowLotCell = row.find(cell => getHorizontalOverlapPercentage(cell, lotCell) > 90);
-            let rowSectionCell = row.find(cell => getHorizontalOverlapPercentage(cell, sectionCell) > 90);
-            let rowAddressCell = row.find(cell => getHorizontalOverlapPercentage(cell, addressCell) > 90);
-            let rowDescriptionCell = row.find(cell => getHorizontalOverlapPercentage(cell, descriptionCell) > 90);
+                let streetName = "";
+                if (streetNameElements !== undefined)
+                    streetName = streetNameElements.map(element => element.text).join(" ").replace(/\s\s+/g, " ").trim();
 
-            // Construct the application number.
+                // Get the plan.
 
-            if (rowApplicationNumberCell === undefined)
-                continue;
-            let applicationNumber = rowApplicationNumberCell.elements.map(element => element.text).join("").trim();
-            if (!/[0-9]+\/[0-9]+/.test(applicationNumber))  // an application number must be present, for example, "141/17"
-                continue;
+                let plan = "";
+                if (planElements !== undefined)
+                    plan = planElements.map(element => element.text).join(" ").replace(/\s\s+/g, " ").trim();
 
-            // Construct the address.
+                // Get the suburb name.
 
-            if (rowAddressCell === undefined)
-                continue;
-            
-            let hundred = "";  // used in the legal description later
-            let hundredElement = rowAddressCell.elements.pop();
-            if (hundredElement.text.trim().startsWith("HD ") || hundredElement.text.trim().toUpperCase().startsWith("HUNDRED "))
-                hundred = hundredElement.text.replace(/^HD /, "").replace(/^HUNDRED /i, "").trim();  // extract the hundred name from the last element
-            else
-                rowAddressCell.elements.push(hundredElement);
+                let suburbName = "";
+                let hundredName = "";
 
-            let address = rowAddressCell.elements.map(element => element.text).join(", ").replace(/\s\s+/g, " ").trim();
-            address = formatAddress(address);
-            if (address === "" || address.trim() === "-")  // an address must be present
-                continue;
+                if (suburbNameElements !== undefined)
+                    suburbName = suburbNameElements.map(element => element.text).join(" ").replace(/\s\s+/g, " ").trim();
 
-            let houseNumber = "";
-            if (rowHouseNumberCell !== undefined)
-                houseNumber = rowHouseNumberCell.elements.filter(element => element.text.trim() !== "-").map(element => element.text).join(" & ").replace(/\s\s+/g, " ").trim();
-            address = (houseNumber + " " + address).trim();
+                let suburbNameTokens = suburbName.split("/");
+                if (suburbNameTokens.length === 2) {
+                    if (/^HD /.test(suburbNameTokens[1].trim())) {
+                        hundredName = suburbNameTokens[1].trim();  // for example, "EMU FLAT/HD CLARE"
+                        suburbName = suburbNameTokens[0].trim();
+                    } else {
+                        hundredName = suburbNameTokens[0].trim();  // for example, "HD CLARE/EMU FLAT" or "WATERLOO / MARRABEL"
+                        suburbName = suburbNameTokens[1].trim();
+                    }
+                }
 
-            // Construct the description.
+                hundredName = hundredName.replace(/^HD /i, "");
+                suburbName = suburbName.replace(/^HD /i, "");
 
-            let description = "";
-            if (rowDescriptionCell !== undefined) {
-                description = rowDescriptionCell.elements.map(element => element.text).join(" ").replace(/\s\s+/g, " ").trim();
-                let truncatedDescription = description.replace(/( - )?BUILDING RULES ONLY$/i, "").replace(/( - )?BUILDING ONLY$/i, "").replace(/( - )?PLANNING ONLY$/i, "").trim();
-                if (truncatedDescription !== "")
-                    description = truncatedDescription;
-                description = description.replace(/\bDW ELLING\b/gi, "DWELLING");  // correct a common problem (an extra space)
+                // Get the description.
+
+                let description = "";
+                if (descriptionElements !== undefined)
+                    description = descriptionElements.map(element => element.text).join(" ").replace(/\s\s+/g, " ").trim();
+                if (description === "")
+                    description = "No Description Provided"
+
+                // Construct the legal description.
+
+                let legalDescriptionItems = []
+                if (lotNumber !== "")
+                    legalDescriptionItems.push(`Lot ${lotNumber}`);
+                if (plan !== "")
+                    legalDescriptionItems.push(`Plan ${plan}`);
+                if (hundredName !== "")
+                    legalDescriptionItems.push(`Hundred ${hundredName}`);
+                let legalDescription = legalDescriptionItems.join(", ");
+
+                // Create an object containing all details of the development application.
+
+                let developmentApplication = developmentApplications[applicationNumber];
+                if (developmentApplication === undefined) {
+                    developmentApplication =
+                    {
+                        applicationNumber: applicationNumber,
+                        address: "",
+                        description: "No Description Provided",
+                        informationUrl: url,
+                        commentUrl: CommentUrl,
+                        scrapeDate: moment().format("YYYY-MM-DD"),
+                        receivedDate: "",
+                        legalDescription: ""
+                    };
+                    developmentApplications[applicationNumber] = developmentApplication;
+                }
+
+                if (receivedDateHeadingElement !== undefined)
+                    developmentApplication.receivedDate = receivedDate.isValid() ? receivedDate.format("YYYY-MM-DD") : "";
+                if (houseNumberHeadingElement !== undefined || streetNameHeadingElement !== undefined || suburbNameHeadingElement !== undefined)
+                    developmentApplication.address = formatAddress((streetName !== "" && suburbName !== "") ? `${houseNumber} ${streetName}, ${suburbName}` : "");
+                if (lotNumberHeadingElement !== undefined || planHeadingElement !== undefined || suburbNameHeadingElement !== undefined)
+                    developmentApplication.legalDescription = legalDescription;
+                if (descriptionHeadingElement !== undefined)
+                    developmentApplication.description = description;
             }
-
-            // Construct the received date.
-
-            let receivedDate = moment.invalid();
-            if (rowReceivedDateCell !== undefined && rowReceivedDateCell.elements.length > 0)
-                receivedDate = moment(rowReceivedDateCell.elements[0].text.trim(), "D/MM/YYYY", true);
-
-            // Construct the legal description.
-
-            let legalElements = [];
-
-            let lot = "";
-            if (rowLotCell !== undefined) {
-                lot = rowLotCell.elements.filter(element => element.text.trim() !== "-").map(element => element.text).join(" & ").replace(/\s\s+/g, " ").trim();
-                if (lot !== "")
-                    legalElements.push(`Lot ${lot}`);
-            }
-
-            let section = "";
-            if (rowSectionCell !== undefined) {
-                section = rowSectionCell.elements.filter(element => element.text.trim() !== "-").map(element => element.text).join(" & ").replace(/\s\s+/g, " ").trim();
-                if (section !== "")
-                    legalElements.push(`Section ${section}`);
-            }
-
-            if (hundred !== "")  // extracted from the address earlier
-                legalElements.push(`Hundred ${hundred}`);
-
-            let legalDescription = legalElements.join(", ");
-
-            developmentApplications.push({
-                applicationNumber: applicationNumber,
-                address: address,
-                description: ((description === "") ? "NO DESCRIPTION PROVIDED" : description),
-                informationUrl: url,
-                commentUrl: CommentUrl,
-                scrapeDate: moment().format("YYYY-MM-DD"),
-                receivedDate: receivedDate.isValid ? receivedDate.format("YYYY-MM-DD") : "",
-                legalDescription: legalDescription
-            });        
         }
     }
 
-    return developmentApplications;
+    for (let developmentApplication of developmentApplications)
+        if (developmentApplication === "")
+            console.log(`Ignoring development application ${developmentApplication.applicationNumber} because the address was blank (the street name or suburb name is blank).`);
+
+    return Object.values(developmentApplications).filter(developmentApplication => developmentApplication.address !== "");
 }
 
 // Gets a random integer in the specified range: [minimum, maximum).
