@@ -432,14 +432,16 @@ async function parsePdf(url: string) {
     // Remove any development applications with invalid addresses or application numbers.
 
     let filteredDevelopmentApplications = [];
+    let previousApplicationNumber;
     for (let developmentApplication of Object.values(developmentApplications)) {
         if (developmentApplication.applicationNumber === "") {
-            console.log(`Ignoring a development application because the application number was blank.`);
+            console.log(`Ignoring a development application because the application number was blank.${(previousApplicationNumber === undefined) ? "" : ("  The previous application number was " + previousApplicationNumber + ".")}`);
             continue;
         } else if (developmentApplication.address === "") {
-            console.log(`Ignoring development application ${developmentApplication.applicationNumber} because the address was blank (the street name or suburb name is blank).`);
+            console.log(`Ignoring development application ${developmentApplication.applicationNumber} because the address was blank (the street name or suburb name is blank).${(previousApplicationNumber === undefined) ? "" : ("  The previous application number was " + previousApplicationNumber + ".")}`);
             continue;
         }
+        previousApplicationNumber = developmentApplication.applicationNumber;
         filteredDevelopmentApplications.push(developmentApplication);
     }
 
