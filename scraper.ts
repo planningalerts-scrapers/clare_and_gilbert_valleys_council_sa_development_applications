@@ -17,7 +17,7 @@ import didYouMean, * as didyoumean from "didyoumean2";
 
 sqlite3.verbose();
 
-const DevelopmentApplicationsUrl = "https://www.claregilbertvalleys.sa.gov.au/page.aspx?u=491";
+const DevelopmentApplicationsUrl = "https://www.claregilbertvalleys.sa.gov.au/council-documents/clare-and-gilbert-valleys-council-planning-and-development-reports";
 const CommentUrl = "mailto:admin@cgvc.sa.gov.au";
 
 declare const process: any;
@@ -59,7 +59,7 @@ async function insertRow(database, developmentApplication) {
                 console.error(error);
                 reject(error);
             } else {
-                console.log(`    Saved: application \"${developmentApplication.applicationNumber}\" with address \"${developmentApplication.address}\", description \"${developmentApplication.description}\", legal description \"${developmentApplication.legalDescription}\" and received date \"${developmentApplication.receivedDate}\" into the database.`);
+                console.log(`    Saved application \"${developmentApplication.applicationNumber}\" with address \"${developmentApplication.address}\", description \"${developmentApplication.description}\", legal description \"${developmentApplication.legalDescription}\" and received date \"${developmentApplication.receivedDate}\" to the database.`);
                 sqlStatement.finalize();  // releases any locks
                 resolve(row);
             }
@@ -265,7 +265,7 @@ async function parsePdf(url: string) {
 
         let elements = await parseElements(page);
 
-        // The co-ordinate system used in a PDF is typically "upside done" so invert the
+        // The co-ordinate system used in a PDF is typically "upside down" so invert the
         // co-ordinates (and so this makes the subsequent logic easier to understand).
 
         for (let element of elements)
